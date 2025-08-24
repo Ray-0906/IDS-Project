@@ -20,7 +20,7 @@ export const addLog = async (req, res) => {
 export const getLogs = async (req, res) => {
     const { serverId } = req.params;
     try {
-        const logs = await Log.find({ server: serverId }).populate("server");
+        const logs = await Log.find({ server: serverId });
         res.status(200).json({ logs });
     } catch (error) {
         res.status(500).json({ message: "Error fetching logs", error });

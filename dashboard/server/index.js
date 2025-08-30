@@ -6,10 +6,16 @@ import serverRoutes from './routes/serverRoute.js';
 import { authMiddleware } from './middlewares/authmiddleware.js';
 import { config } from 'dotenv';
 import cookieParser from 'cookie-parser';
+import cors from 'cors';
 config();
 const app = express();
 
 // middleware
+app.use(cors({
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+}));;
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));

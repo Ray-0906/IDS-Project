@@ -12,7 +12,7 @@ const cookieOptions = {
 
 export const registerUser = async (req, res) => {
   const { name, email, password } = req.body;
-
+ console.log(req.body);
   try {
      const exists = await User.findOne({ email });
     if (exists) return res.status(400).json({ msg: "Email already in use" });
@@ -24,7 +24,7 @@ export const registerUser = async (req, res) => {
       expiresIn: "7d",
     });
     res.cookie("token", token, cookieOptions)
-       .status(201).json({ message: "User registered successfully" });
+       .status(201).json({ message: "User registered successfully" ,user:newUser});
   } catch (error) {
     res.status(500).json({ message: "Error registering user", error });
   }
@@ -42,7 +42,7 @@ export const loginUser = async (req, res) => {
     if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
     res.cookie("token", token, cookieOptions)
-      .status(200).json({ message: "User logged in successfully" });
+      .status(200).json({ message: "User logged in successfully",user });
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({
@@ -50,4 +50,20 @@ export const loginUser = async (req, res) => {
       error: error.message || String(error)
     });
   }
+};
+
+export const logoutUser = (req, res) => {
+  res.clearCookie("token", cookieOptions);
+  res.status(200).json({ message: "User logged out successfully" });
+};
+
+export const verifyUser = (req, res) => {
+  const token = req.cookies.token;
+  if (!token) return res.status(401).json({ message: "Unauthorized" });
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) return res.status(401).json({ message: "Unauthorized" });
+    req.user = decoded;
+    res.status(200).json({ message: "User verified", user: decoded });
+  });
 };

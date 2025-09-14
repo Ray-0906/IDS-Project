@@ -4,6 +4,7 @@ const logSchema = new mongoose.Schema({
     server: { type: mongoose.Schema.Types.ObjectId, ref: "Server" },
     attack: String,
     severity: String,
+    condidence: Number,
     timestamp: { type: Date, default: Date.now }
 });
 

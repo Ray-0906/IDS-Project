@@ -40,7 +40,7 @@ feature_columns = [
     "is_guest_login_0", "is_guest_login_1"
 ]
 
-# Attack labeling heuristics copied from original training logic
+# Original simple label function (kept)
 
 def label_attack_type(row: pd.Series) -> str:
     try:
@@ -74,6 +74,36 @@ def label_attack_type(row: pd.Series) -> str:
             return 'Other'
     except Exception:
         return 'Other'
+
+# More permissive scored heuristic to reduce 'Other'
+
+def scored_attack_label(row: pd.Series) -> str:
+    rules = []  # (score, label)
+    def add(cond, score, label):
+        if cond:
+            rules.append((score, label))
+    proto = row.get('protocol_type')
+    flag = row.get('flag')
+    service = row.get('service')
+    # Relaxed thresholds
+    add(proto=='icmp' and service in ['eco_i','ecr_i'] and flag=='SF' and row.get('dst_host_same_srv_rate',0)>0.3, 9, 'Smurf')
+    add(proto=='tcp' and flag=='S0' and (row.get('serror_rate',0)>0.3 or row.get('srv_serror_rate',0)>0.3), 9, 'Neptune')
+    add(proto=='tcp' and row.get('diff_srv_rate',0)>0.2 and flag in ['SF','S1'], 7, 'Nmap')
+    add(row.get('srv_count',0)>5 and row.get('dst_host_srv_count',0)>5 and proto in ['tcp','icmp'] and flag in ['SF','S1'], 6, 'Satan')
+    add(proto=='tcp' and service=='private' and row.get('dst_host_count',0)>100 and flag=='REJ', 8, 'Portsweep')
+    add(proto=='icmp' and service=='other' and row.get('serror_rate',0)<0.1, 5, 'Ping_of_Death')
+    add(service in ['ftp','telnet'] and row.get('num_failed_logins',0)>0 and proto=='tcp', 5, 'Guess_password')
+    add(service=='ftp' and row.get('num_file_creations',0)>0 and row.get('num_failed_logins',0)>0, 6, 'FTP_write')
+    add(row.get('root_shell',0)>0 or row.get('num_root',0)>0 or row.get('num_shells',0)>0 or row.get('su_attempted',0)>0, 7, 'Rootkit')
+    add((row.get('src_bytes',0)>500 or row.get('dst_bytes',0)>500) and flag in ['S0','REJ'] and (row.get('serror_rate',0)>0.3 or row.get('dst_host_serror_rate',0)>0.3), 7, 'DoS')
+    add((row.get('count',0)>10 or row.get('srv_count',0)>10) and flag in ['S1','S3','SF'] and proto in ['tcp','icmp'], 5, 'Probe')
+    add((row.get('num_failed_logins',0)>0 or str(row.get('is_guest_login','0'))=='1') and service in ['ftp','telnet','ssh'] and (row.get('num_access_files',0)>0 or row.get('num_file_creations', 0)>0), 5, 'R2L')
+    add((row.get('root_shell',0)>0 or row.get('su_attempted',0)>0) and (row.get('num_root',0)>0 or row.get('num_file_creations',0)>0 or row.get('num_shells',0)>0), 6, 'U2R')
+    if not rules:
+        return 'Other'
+    # Pick highest score; tie -> first inserted (most specific earlier rules have higher score)
+    rules.sort(key=lambda x: x[0], reverse=True)
+    return rules[0][1]
 
 
 def load_xgb_model(path: str | Path) -> XGBClassifier:
@@ -115,9 +145,8 @@ def predict_from_encoded_feature_dict(raw_dict: Dict[str, Any], model: XGBClassi
     df = pd.DataFrame([row])
     pred = model.predict(df)[0]
     proba = model.predict_proba(df)[0][1]
-    # Reconstruct minimal series for attack labeling
+    # Reconstruct minimal fields
     proto = 'tcp' if row.get('protocol_type_tcp') else ('udp' if row.get('protocol_type_udp') else ('icmp' if row.get('protocol_type_icmp') else 'other'))
-    # Find service one-hot
     service = 'other'
     for k in row.keys():
         if k.startswith('service_') and row[k] == 1:
@@ -152,7 +181,7 @@ def predict_from_encoded_feature_dict(raw_dict: Dict[str, Any], model: XGBClassi
         'is_guest_login': row.get('is_guest_login_1',0),
         'num_access_files': row.get('num_access_files',0)
     })
-    attack_type = label_attack_type(series) if pred == 1 else 'Normal'
+    attack_type = scored_attack_label(series) if pred == 1 else 'Normal'
     return {
         'prediction': 'Anomaly' if pred == 1 else 'Normal',
         'probability_of_anomaly': float(proba),
